@@ -1,5 +1,5 @@
 {
-  "name": "emberscroll-backend",
+  "name": "procrastination-fire-backend",
   "version": "1.0.0",
   "description": "Backend for EmberScroll Android game",
   "main": "server.js",
