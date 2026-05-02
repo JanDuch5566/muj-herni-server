@@ -9,11 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 // In-memory "database" (Render pro-plan supports disk, free-tier resets on restart)
-let leaderboard = [
-  { userId: '1', displayName: 'ZombieScroller', level: 99, totalScrollTimeMs: 999999999, embers: 100000 },
-  { userId: '2', displayName: 'DoomScrollKing', level: 50, totalScrollTimeMs: 500000000, embers: 50000 },
-  { userId: '3', displayName: 'LazyLegend', level: 25, totalScrollTimeMs: 120000000, embers: 10000 }
-];
+let leaderboard = [];
 
 let currentMarketEvent = {
   id: 'tiktok_ban_global',
