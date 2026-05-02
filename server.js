@@ -14,18 +14,20 @@ const marketEvents = [
   {
     id: 'tiktok_ban_global',
     name: 'TikTok Ban Wave',
-    description: 'Regulators crackdown on short-form video apps. Prices surging!',
+    description: 'Regulators crackdown on short-form video apps. TikTok earnings disabled.',
     priceModifier: 2.5,
     durationMinutes: 20,
-    affectedCategories: ['social', 'video']
+    affectedCategories: ['social', 'video'],
+    disabledApp: 'com.zhiliaoapp.musically'
   },
   {
     id: 'instagram_collapse',
     name: 'Instagram Outage',
-    description: 'Servers down worldwide. Users panic-scrolling other apps.',
+    description: 'Servers down worldwide. Instagram earnings blocked.',
     priceModifier: 1.8,
     durationMinutes: 20,
-    affectedCategories: ['social']
+    affectedCategories: ['social'],
+    disabledApp: 'com.instagram.android'
   },
   {
     id: 'youtube_algorithm',
