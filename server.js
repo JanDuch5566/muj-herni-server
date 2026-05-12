@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,7 +9,34 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-let leaderboard = [];
+// MongoDB Atlas — nastav MONGODB_URI v Render dashboard
+// Formát: mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/?retryWrites=true&w=majority
+const MONGODB_URI = process.env.MONGODB_URI;
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'change-me-in-render-env';
+
+let leaderboardCol = null;
+
+async function connectDB() {
+  if (!MONGODB_URI) {
+    console.warn('[DB] MONGODB_URI not set — leaderboard bude in-memory fallback');
+    return;
+  }
+  const client = new MongoClient(MONGODB_URI, {
+    serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
+  });
+  await client.connect();
+  const db = client.db('emberscroll');
+  leaderboardCol = db.collection('leaderboard');
+  await leaderboardCol.createIndex({ userId: 1 }, { unique: true });
+  console.log('[DB] MongoDB Atlas connected');
+}
+
+connectDB().catch(err => {
+  console.error('[DB] Connection failed:', err.message);
+});
+
+// In-memory fallback pro případ že MONGODB_URI není nastaven
+let leaderboardFallback = [];
 
 const marketEvents = [
   {
@@ -61,7 +89,6 @@ let currentMarketEvent = {
   triggeredAt: Date.now()
 };
 
-// Rotate events every 20 minutes
 setInterval(() => {
   currentEventIndex = (currentEventIndex + 1) % marketEvents.length;
   currentMarketEvent = {
@@ -73,22 +100,35 @@ setInterval(() => {
 
 // --- Leaderboard API ---
 
-app.get('/api/v1/leaderboard', (req, res) => {
-  const sorted = [...leaderboard].sort((a, b) => b.level - a.level || b.totalScrollTimeMs - a.totalScrollTimeMs);
-  res.json(sorted.slice(0, 50));
+app.get('/api/v1/leaderboard', async (_req, res) => {
+  try {
+    if (leaderboardCol) {
+      const entries = await leaderboardCol
+        .find({}, { projection: { _id: 0 } })
+        .sort({ level: -1, totalScrollTimeMs: -1 })
+        .limit(50)
+        .toArray();
+      return res.json(entries);
+    }
+    // Fallback
+    const sorted = [...leaderboardFallback].sort((a, b) => b.level - a.level || b.totalScrollTimeMs - a.totalScrollTimeMs);
+    res.json(sorted.slice(0, 50));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/v1/leaderboard', (req, res) => {
+app.post('/api/v1/leaderboard', async (req, res) => {
   const { displayName, userId, level, totalScrollTimeMs, embers } = req.body;
 
   if (!displayName) {
     return res.status(400).json({ error: 'Display name is required' });
   }
 
-  const existingIndex = leaderboard.findIndex(p => p.userId === userId || p.displayName === displayName);
+  const resolvedUserId = userId || uuidv4();
 
   const entry = {
-    userId: userId || (existingIndex >= 0 ? leaderboard[existingIndex].userId : uuidv4()),
+    userId: resolvedUserId,
     displayName,
     level: level || 1,
     totalScrollTimeMs: totalScrollTimeMs || 0,
@@ -96,25 +136,57 @@ app.post('/api/v1/leaderboard', (req, res) => {
     lastUpdate: Date.now()
   };
 
-  if (existingIndex >= 0) {
-    leaderboard[existingIndex] = entry;
-  } else {
-    leaderboard.push(entry);
+  try {
+    if (leaderboardCol) {
+      await leaderboardCol.updateOne(
+        { userId: resolvedUserId },
+        { $set: entry },
+        { upsert: true }
+      );
+      return res.status(201).json(entry);
+    }
+    // Fallback in-memory
+    const idx = leaderboardFallback.findIndex(p => p.userId === resolvedUserId);
+    if (idx >= 0) {
+      leaderboardFallback[idx] = entry;
+    } else {
+      leaderboardFallback.push(entry);
+    }
+    res.status(201).json(entry);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
+});
 
-  res.status(201).json(entry);
+// --- Admin: wipe leaderboard ---
+
+app.delete('/api/v1/admin/leaderboard', async (req, res) => {
+  if (req.headers['x-admin-token'] !== ADMIN_TOKEN) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    if (leaderboardCol) {
+      const result = await leaderboardCol.deleteMany({});
+      return res.json({ cleared: true, deleted: result.deletedCount });
+    }
+    const count = leaderboardFallback.length;
+    leaderboardFallback = [];
+    res.json({ cleared: true, deleted: count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Market API ---
 
-app.get('/api/v1/market/events', (req, res) => {
+app.get('/api/v1/market/events', (_req, res) => {
   res.json([currentMarketEvent]);
 });
 
 // --- Status API ---
 
-app.get('/status', (req, res) => {
-  res.json({ status: 'active', serverTime: Date.now() });
+app.get('/status', (_req, res) => {
+  res.json({ status: 'active', serverTime: Date.now(), db: leaderboardCol ? 'mongodb' : 'memory' });
 });
 
 app.listen(PORT, () => {
