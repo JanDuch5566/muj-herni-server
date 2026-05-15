@@ -42,7 +42,7 @@ const marketEvents = [
   {
     id: 'tiktok_ban_global',
     name: 'TikTok Ban Wave',
-    description: 'Regulators crackdown on short-form video apps. TikTok earnings disabled.',
+    description: 'Regulators crackdown on short-form video apps. TikTok disabled. Earnings x2.5 for Social/Video apps.',
     priceModifier: 2.5,
     durationMinutes: 20,
     affectedCategories: ['social', 'video'],
@@ -51,7 +51,7 @@ const marketEvents = [
   {
     id: 'instagram_collapse',
     name: 'Instagram Outage',
-    description: 'Servers down worldwide. Instagram earnings blocked.',
+    description: 'Servers down worldwide. Instagram blocked. Earnings x1.8 for Social apps.',
     priceModifier: 1.8,
     durationMinutes: 20,
     affectedCategories: ['social'],
@@ -60,7 +60,7 @@ const marketEvents = [
   {
     id: 'youtube_algorithm',
     name: 'YouTube Algorithm Surge',
-    description: 'Recommended feed goes haywire. Hours lost in autoplay.',
+    description: 'Recommended feed goes haywire. Hours lost in autoplay. Earnings x3.0 for Video/Entertainment.',
     priceModifier: 3.0,
     durationMinutes: 20,
     affectedCategories: ['video', 'entertainment']
@@ -68,7 +68,7 @@ const marketEvents = [
   {
     id: 'doomscroll_festival',
     name: 'Doomscroll Festival',
-    description: 'Global news cycle spirals. Everyone glued to their phone.',
+    description: 'Global news cycle spirals. Everyone glued to their phone. Earnings x2.0 for Social/News.',
     priceModifier: 2.0,
     durationMinutes: 20,
     affectedCategories: ['social', 'news']
@@ -76,7 +76,7 @@ const marketEvents = [
   {
     id: 'reddit_ama',
     name: 'Reddit AMA Frenzy',
-    description: 'Celebrity AMA sparks mass procrastination event.',
+    description: 'Celebrity AMA sparks mass procrastination event. Earnings x1.5 for Entertainment.',
     priceModifier: 1.5,
     durationMinutes: 20,
     affectedCategories: ['entertainment']
