@@ -105,13 +105,13 @@ app.get('/api/v1/leaderboard', async (_req, res) => {
     if (leaderboardCol) {
       const entries = await leaderboardCol
         .find({}, { projection: { _id: 0 } })
-        .sort({ level: -1, totalScrollTimeMs: -1 })
+        .sort({ embers: -1, level: -1 })
         .limit(50)
         .toArray();
       return res.json(entries);
     }
     // Fallback
-    const sorted = [...leaderboardFallback].sort((a, b) => b.level - a.level || b.totalScrollTimeMs - a.totalScrollTimeMs);
+    const sorted = [...leaderboardFallback].sort((a, b) => b.embers - a.embers || b.level - a.level);
     res.json(sorted.slice(0, 50));
   } catch (err) {
     res.status(500).json({ error: err.message });
