@@ -100,19 +100,51 @@ setInterval(() => {
 
 // --- Leaderboard API ---
 
+app.post('/api/v1/leaderboard/ping', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+  try {
+    if (leaderboardCol) {
+      const result = await leaderboardCol.updateOne(
+        { userId },
+        { $set: { lastUpdate: Date.now() } }
+      );
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      return res.json({ success: true });
+    }
+    const idx = leaderboardFallback.findIndex(p => p.userId === userId);
+    if (idx < 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    leaderboardFallback[idx].lastUpdate = Date.now();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
 app.get('/api/v1/leaderboard', async (_req, res) => {
   try {
     if (leaderboardCol) {
       const entries = await leaderboardCol
-        .find({}, { projection: { _id: 0 } })
+        .find({}, { projection: { _id: 0, userId: 0 } })
         .sort({ embers: -1, level: -1 })
         .limit(50)
         .toArray();
       return res.json(entries);
     }
-    // Fallback
-    const sorted = [...leaderboardFallback].sort((a, b) => b.embers - a.embers || b.level - a.level);
-    res.json(sorted.slice(0, 50));
+    // Fallback — strip userId before sending
+    const sorted = [...leaderboardFallback]
+      .sort((a, b) => b.embers - a.embers || b.level - a.level)
+      .slice(0, 50)
+      .map(({ userId: _uid, ...pub }) => pub);
+    res.json(sorted);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -138,6 +170,13 @@ app.post('/api/v1/leaderboard', async (req, res) => {
 
   try {
     if (leaderboardCol) {
+      // Reject if a *different* userId already owns this displayName
+      const conflict = await leaderboardCol.findOne(
+        { displayName, userId: { $ne: resolvedUserId } }
+      );
+      if (conflict) {
+        return res.status(400).json({ error: 'This display name is already taken by another device.' });
+      }
       await leaderboardCol.updateOne(
         { userId: resolvedUserId },
         { $set: entry },
@@ -146,6 +185,12 @@ app.post('/api/v1/leaderboard', async (req, res) => {
       return res.status(201).json(entry);
     }
     // Fallback in-memory
+    const conflict = leaderboardFallback.find(
+      p => p.displayName === displayName && p.userId !== resolvedUserId
+    );
+    if (conflict) {
+      return res.status(400).json({ error: 'This display name is already taken by another device.' });
+    }
     const idx = leaderboardFallback.findIndex(p => p.userId === resolvedUserId);
     if (idx >= 0) {
       leaderboardFallback[idx] = entry;
@@ -177,10 +222,125 @@ app.delete('/api/v1/admin/leaderboard', async (req, res) => {
   }
 });
 
+// --- Admin: delete single user ---
+
+app.delete('/api/v1/admin/leaderboard/user/:userId', async (req, res) => {
+  if (req.headers['x-admin-token'] !== ADMIN_TOKEN) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { userId } = req.params;
+  try {
+    if (leaderboardCol) {
+      await leaderboardCol.deleteOne({ userId });
+      return res.json({ deleted: true, userId });
+    }
+    leaderboardFallback = leaderboardFallback.filter(p => p.userId !== userId);
+    res.json({ deleted: true, userId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Inactivity cleanup (every 6 hours, remove entries older than 7 days) ---
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function cleanupInactive() {
+  const cutoff = Date.now() - SEVEN_DAYS_MS;
+  try {
+    if (leaderboardCol) {
+      const result = await leaderboardCol.deleteMany({ lastUpdate: { $lt: cutoff } });
+      if (result.deletedCount > 0) {
+        console.log(`[Cleanup] Removed ${result.deletedCount} inactive player(s) from MongoDB`);
+      }
+    } else {
+      const before = leaderboardFallback.length;
+      leaderboardFallback = leaderboardFallback.filter(p => p.lastUpdate >= cutoff);
+      const removed = before - leaderboardFallback.length;
+      if (removed > 0) {
+        console.log(`[Cleanup] Removed ${removed} inactive player(s) from in-memory store`);
+      }
+    }
+  } catch (err) {
+    console.error('[Cleanup] Error during inactive player cleanup:', err.message);
+  }
+}
+
+setInterval(cleanupInactive, 6 * 60 * 60 * 1000);
+
 // --- Market API ---
+
+const upgradeIds = [
+  'candle_flicker',
+  'passive_ember',
+  'combo_window',
+  'ad_luck',
+  'crit_chance',
+  'click_yield'
+];
+
+let marketUpgrades = upgradeIds.map(id => ({
+  id,
+  efficiency: 1.0,
+  rating: 'FAIR',
+  priceMultiplier: 1.0,
+  trend: 'STABLE'
+}));
+let cycleStartedAt = Date.now();
+
+function nextGaussian() {
+  let u = 0, v = 0;
+  while(u === 0) u = Math.random(); 
+  while(v === 0) v = Math.random();
+  return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+}
+
+function updateGlobalUpgrades() {
+  const now = Date.now();
+  cycleStartedAt = now;
+  marketUpgrades = marketUpgrades.map(item => {
+    const oldEff = item.efficiency;
+    const volatility = 0.1;
+    const effChange = nextGaussian() * volatility;
+    let currentEff = oldEff + effChange;
+    currentEff += (1.0 - currentEff) * 0.05; // pull to 1.0
+    currentEff = Math.max(0.3, Math.min(2.0, currentEff));
+    
+    let rating = 'FAIR';
+    if (currentEff >= 1.4) rating = 'HOT';
+    else if (currentEff >= 1.1) rating = 'GOOD';
+    else if (currentEff >= 0.8) rating = 'FAIR';
+    else if (currentEff >= 0.5) rating = 'POOR';
+    else rating = 'TERRIBLE';
+
+    let trend = 'STABLE';
+    if (currentEff > oldEff + 0.05) trend = 'RISING';
+    else if (currentEff < oldEff - 0.05) trend = 'FALLING';
+
+    const efficiencyPremium = (currentEff - 1.0) * 0.5;
+    const priceMultiplier = Math.max(0.5, Math.min(3.0, 1.0 + efficiencyPremium));
+
+    return {
+      id: item.id,
+      efficiency: parseFloat(currentEff.toFixed(4)),
+      rating,
+      priceMultiplier: parseFloat(priceMultiplier.toFixed(4)),
+      trend
+    };
+  });
+  console.log(`[${new Date().toISOString()}] Global upgrades pricing refreshed`);
+}
+
+// Init
+updateGlobalUpgrades();
+setInterval(updateGlobalUpgrades, 3600 * 1000);
 
 app.get('/api/v1/market/events', (_req, res) => {
   res.json([currentMarketEvent]);
+});
+
+app.get('/api/v1/market/upgrades', (_req, res) => {
+  res.json(marketUpgrades.map(u => ({ ...u, cycleStartedAt })));
 });
 
 // --- Status API ---
